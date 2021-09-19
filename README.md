@@ -1,4 +1,4 @@
-# Azure IoT middleware for Azure RTOS runs on Raspberry Pi RP2040
+# Azure IoT middleware for Azure RTOS runs on Raspberry Pi RP2040 MCU and Espressif ESP32-C3 SoC
 
 ## Introduction
 
@@ -22,15 +22,13 @@ The demo is verified on [Raspberry Pi Pico](https://www.st.com/en/evaluation-too
 
 ESP32-C3 must be programmed with ESP-AT firmware. Refer to this [link](https://download.espressif.com/esp_at/firmware/ESP32C3/ESP32-C3-MINI-1_AT_Bin_V2.2.0.0.zip) for pre-built binary and document. 
 
-## Disclamer 
-
-This project is ONLY for demo and study purpose. Pleas be aware that Azure RTOS does not include a commerical license for Raspberry Pi RP2040 MCU. 
-
 ## License
 
 | Components | License
 | ---- |  ----  | 
 | app  | Refer to [LICENSE](./LICENSE)  |
 | lwesp | Refer to [LICENSE](./lwesp/LICENSE)  |
-| threadx and netxduo | Refer to [LICENSE.txt](./threadx/LICENSE.txt) and [LICENSED-HARDWARE.txt](./threadx/LICENSED-HARDWARE.txt) | 
+| threadx / netxduo | Refer to [LICENSE.txt](./threadx/LICENSE.txt) and [LICENSED-HARDWARE.txt](./threadx/LICENSED-HARDWARE.txt) | 
+
+> Please be aware that this project is ONLY for demo and study purpose. Azure RTOS does not include a commerical license for Raspberry Pi RP2040 MCU. 
 
