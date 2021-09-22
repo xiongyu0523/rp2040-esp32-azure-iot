@@ -1,6 +1,6 @@
 /**
- * \file            lwesp_opts.h
- * \brief           user config file
+ * \file            lwesp_mem_lwmem.c
+ * \brief           Dynamic memory manager implemented with LwMEM
  */
 
 /*
@@ -31,18 +31,32 @@
  * Author:          Tilen MAJERLE <tilen@majerle.eu>
  * Version:         v1.1.0-dev
  */
-#ifndef LWESP_HDR_OPTS_H
-#define LWESP_HDR_OPTS_H
+#include "lwesp/lwesp.h"
+#include "tx_api.h"
 
-#define LWESP_CFG_ESP32_C3          1
-#define LWESP_CFG_RESTORE_ON_INIT   1
-#define LWESP_CFG_INPUT_USE_PROCESS 0
-#define LWESP_CFG_MEM_CUSTOM        1
-#define LWESP_MEM_SIZE              8192
-#define LWESP_CFG_NETCONN           1
-#define LWESP_CFG_DNS               1
-#define LWESP_CFG_WEBSERVER         0
-#define LWESP_CFG_AT_ECHO           0
-#define LWESP_CFG_SNTP              1
+extern TX_BYTE_POOL lwesp_byte_tool;
 
-#endif /* LWESP_HDR_OPTS_H */
+void*
+lwesp_mem_malloc(size_t size) {
+    void *pointer;
+    return tx_byte_allocate(&lwesp_byte_tool, &pointer, size, TX_NO_WAIT) == TX_SUCCESS ? pointer : NULL;
+}
+
+void*
+lwesp_mem_realloc(void* ptr, size_t size) {
+    /* No need to support it */
+    return NULL;
+}
+
+void*
+lwesp_mem_calloc(size_t num, size_t size) {
+    size_t total = num * size;
+    void *pointer = lwesp_mem_malloc(total);
+    TX_MEMSET(pointer, 0, total);
+    return pointer;
+}
+
+void
+lwesp_mem_free(void* ptr) {
+    (VOID)tx_byte_release(ptr);
+}

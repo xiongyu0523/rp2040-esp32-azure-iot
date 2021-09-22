@@ -1,401 +1,598 @@
+/**************************************************************************/
+/*                                                                        */
+/*       Copyright (c) Microsoft Corporation. All rights reserved.        */
+/*                                                                        */
+/*       This software is licensed under the Microsoft Software License   */
+/*       Terms for Microsoft Azure RTOS. Full text of the license can be  */
+/*       found in the LICENSE file at https://aka.ms/AzureRTOS_EULA       */
+/*       and in the root directory of this software.                      */
+/*                                                                        */
+/**************************************************************************/
+
 #include <stdio.h>
-#include "tx_api.h"
 #include "pico/stdlib.h"
-#include "hardware/gpio.h"
+#include "nx_api.h"
+#ifndef SAMPLE_DHCP_DISABLE
+#include "nxd_dhcp_client.h"
+#endif /* SAMPLE_DHCP_DISABLE */
+#include "nxd_dns.h"
+#include "nxd_sntp_client.h"
+#include "nx_secure_tls_api.h"
 
-#define DEMO_STACK_SIZE         1024
-#define DEMO_BYTE_POOL_SIZE     9120
-#define DEMO_BLOCK_POOL_SIZE    100
-#define DEMO_QUEUE_SIZE         100
+/* Include the sample.  */
+extern VOID sample_entry(NX_IP* ip_ptr, NX_PACKET_POOL* pool_ptr, NX_DNS* dns_ptr, UINT (*unix_time_callback)(ULONG *unix_time));
 
+/* Define the default wifi ssid and password. The user can override this 
+   via -D command line option or via project settings.  */
 
-/* Define the ThreadX object control blocks...  */
+#define WIFI_SSID                       ""
+#define WIFI_PASSWORD                   ""
 
-TX_THREAD               thread_0;
-TX_THREAD               thread_1;
-TX_THREAD               thread_2;
-TX_THREAD               thread_3;
-TX_THREAD               thread_4;
-TX_THREAD               thread_5;
-TX_THREAD               thread_6;
-TX_THREAD               thread_7;
-TX_QUEUE                queue_0;
-TX_SEMAPHORE            semaphore_0;
-TX_MUTEX                mutex_0;
-TX_EVENT_FLAGS_GROUP    event_flags_0;
-TX_BYTE_POOL            byte_pool_0;
-TX_BLOCK_POOL           block_pool_0;
-UCHAR                   memory_area[DEMO_BYTE_POOL_SIZE];
+/* Define the helper thread for running Azure SDK on ThreadX (THREADX IoT Platform).  */
+#ifndef SAMPLE_HELPER_STACK_SIZE
+#define SAMPLE_HELPER_STACK_SIZE        (4096)
+#endif /* SAMPLE_HELPER_STACK_SIZE  */
 
+#ifndef SAMPLE_HELPER_THREAD_PRIORITY
+#define SAMPLE_HELPER_THREAD_PRIORITY   (4)
+#endif /* SAMPLE_HELPER_THREAD_PRIORITY  */
 
-/* Define the counters used in the demo application...  */
+/* Define user configurable symbols. */
+#ifndef SAMPLE_IP_STACK_SIZE
+#define SAMPLE_IP_STACK_SIZE            (2048)
+#endif /* SAMPLE_IP_STACK_SIZE  */
 
-ULONG                   thread_0_counter;
-ULONG                   thread_1_counter;
-ULONG                   thread_1_messages_sent;
-ULONG                   thread_2_counter;
-ULONG                   thread_2_messages_received;
-ULONG                   thread_3_counter;
-ULONG                   thread_4_counter;
-ULONG                   thread_5_counter;
-ULONG                   thread_6_counter;
-ULONG                   thread_7_counter;
+#ifndef SAMPLE_PACKET_COUNT
+#define SAMPLE_PACKET_COUNT             (32)
+#endif /* SAMPLE_PACKET_COUNT  */
 
+#ifndef SAMPLE_PACKET_SIZE
+#define SAMPLE_PACKET_SIZE              (1536)
+#endif /* SAMPLE_PACKET_SIZE  */
 
-/* Define thread prototypes.  */
+#define SAMPLE_POOL_SIZE                ((SAMPLE_PACKET_SIZE + sizeof(NX_PACKET)) * SAMPLE_PACKET_COUNT)
 
-void    thread_0_entry(ULONG thread_input);
-void    thread_1_entry(ULONG thread_input);
-void    thread_2_entry(ULONG thread_input);
-void    thread_3_and_4_entry(ULONG thread_input);
-void    thread_5_entry(ULONG thread_input);
-void    thread_6_and_7_entry(ULONG thread_input);
+#ifndef SAMPLE_ARP_CACHE_SIZE
+#define SAMPLE_ARP_CACHE_SIZE           (512)
+#endif /* SAMPLE_ARP_CACHE_SIZE  */
 
+#ifndef SAMPLE_IP_THREAD_PRIORITY
+#define SAMPLE_IP_THREAD_PRIORITY       (1)
+#endif /* SAMPLE_IP_THREAD_PRIORITY */
 
+#if defined(SAMPLE_DHCP_DISABLE) && !defined(SAMPLE_NETWORK_CONFIGURE)
+#ifndef SAMPLE_IPV4_ADDRESS
+/*#define SAMPLE_IPV4_ADDRESS           IP_ADDRESS(192, 168, 100, 33)*/
+#error "SYMBOL SAMPLE_IPV4_ADDRESS must be defined. This symbol specifies the IP address of device. "
+#endif /* SAMPLE_IPV4_ADDRESS */
+
+#ifndef SAMPLE_IPV4_MASK
+/*#define SAMPLE_IPV4_MASK              0xFFFFFF00UL*/
+#error "SYMBOL SAMPLE_IPV4_MASK must be defined. This symbol specifies the IP address mask of device. "
+#endif /* SAMPLE_IPV4_MASK */
+
+#ifndef SAMPLE_GATEWAY_ADDRESS
+/*#define SAMPLE_GATEWAY_ADDRESS        IP_ADDRESS(192, 168, 100, 1)*/
+#error "SYMBOL SAMPLE_GATEWAY_ADDRESS must be defined. This symbol specifies the gateway address for routing. "
+#endif /* SAMPLE_GATEWAY_ADDRESS */
+
+#ifndef SAMPLE_DNS_SERVER_ADDRESS
+/*#define SAMPLE_DNS_SERVER_ADDRESS     IP_ADDRESS(192, 168, 100, 1)*/
+#error "SYMBOL SAMPLE_DNS_SERVER_ADDRESS must be defined. This symbol specifies the dns server address for routing. "
+#endif /* SAMPLE_DNS_SERVER_ADDRESS */
+#else
+#define SAMPLE_IPV4_ADDRESS             IP_ADDRESS(0, 0, 0, 0)
+#define SAMPLE_IPV4_MASK                IP_ADDRESS(0, 0, 0, 0)
+#endif /* SAMPLE_DHCP_DISABLE */
+
+#ifndef SAMPLE_SNTP_SYNC_MAX
+#define SAMPLE_SNTP_SYNC_MAX            30
+#endif /* SAMPLE_SNTP_SYNC_MAX */
+
+#ifndef SAMPLE_SNTP_UPDATE_MAX
+#define SAMPLE_SNTP_UPDATE_MAX          10
+#endif /* SAMPLE_SNTP_UPDATE_MAX */
+
+#ifndef SAMPLE_SNTP_UPDATE_INTERVAL
+#define SAMPLE_SNTP_UPDATE_INTERVAL     (NX_IP_PERIODIC_RATE / 2)
+#endif /* SAMPLE_SNTP_UPDATE_INTERVAL */
+
+/* Default time. GMT: Friday, Jan 1, 2022 12:00:00 AM. Epoch timestamp: 1640995200.  */
+#ifndef SAMPLE_SYSTEM_TIME 
+#define SAMPLE_SYSTEM_TIME              1640995200
+#endif /* SAMPLE_SYSTEM_TIME  */
+
+/* Seconds between Unix Epoch (1/1/1970) and NTP Epoch (1/1/1999) */
+#define SAMPLE_UNIX_TO_NTP_EPOCH_SECOND 0x83AA7E80
+
+static TX_THREAD        sample_helper_thread;
+static NX_PACKET_POOL   pool_0;
+static NX_IP            ip_0;
+static NX_DNS           dns_0;
+#ifndef SAMPLE_DHCP_DISABLE
+static NX_DHCP          dhcp_0;
+#endif /* SAMPLE_DHCP_DISABLE  */
+static NX_SNTP_CLIENT   sntp_client;
+
+/* System clock time for UTC.  */
+static ULONG            unix_time_base;
+
+/* Define the stack/cache for ThreadX.  */
+static ULONG sample_ip_stack[SAMPLE_IP_STACK_SIZE / sizeof(ULONG)];
+#ifndef SAMPLE_POOL_STACK_USER
+static ULONG sample_pool_stack[SAMPLE_POOL_SIZE / sizeof(ULONG)];
+static ULONG sample_pool_stack_size = sizeof(sample_pool_stack);
+#else
+extern ULONG sample_pool_stack[];
+extern ULONG sample_pool_stack_size;
+#endif
+#ifndef SAMPLE_NETWORK_CONFIGURE
+static ULONG sample_arp_cache_area[SAMPLE_ARP_CACHE_SIZE / sizeof(ULONG)];
+#endif
+static ULONG sample_helper_thread_stack[SAMPLE_HELPER_STACK_SIZE / sizeof(ULONG)];
+
+static const CHAR *sntp_servers[] =
+{
+    "0.pool.ntp.org",
+    "1.pool.ntp.org",
+    "2.pool.ntp.org",
+    "3.pool.ntp.org",
+};
+static UINT sntp_server_index;
+
+/* Define the prototypes for sample thread.  */
+static void sample_helper_thread_entry(ULONG parameter);
+
+#ifndef SAMPLE_DHCP_DISABLE
+static void dhcp_wait();
+#endif /* SAMPLE_DHCP_DISABLE */
+
+static UINT dns_create(ULONG dns_server_address);
+
+static UINT sntp_time_sync();
+static UINT unix_time_get(ULONG *unix_time);
+
+#ifndef SAMPLE_NETWORK_DRIVER
+#define SAMPLE_NETWORK_DRIVER           _nx_ram_network_driver
+#endif /* SAMPLE_NETWORK_DRIVER */
+
+/* Include the platform IP driver. */
+void SAMPLE_NETWORK_DRIVER(struct NX_IP_DRIVER_STRUCT *driver_req);
+
+#ifdef SAMPLE_NETWORK_CONFIGURE
+int SAMPLE_NETWORK_CONFIGURE(const CHAR *ssid_ptr, const CHAR *pwd_ptr, NX_IP *ip_ptr, ULONG *dns_address);
+#endif
 
 /* Define main entry point.  */
-
-void demo_threadx(void)
+int main(void)
 {
+    stdio_init_all();
 
     /* Enter the ThreadX kernel.  */
     tx_kernel_enter();
 }
 
-
 /* Define what the initial system looks like.  */
-
 void    tx_application_define(void *first_unused_memory)
 {
 
-CHAR    *pointer;
+UINT  status;
 
+    NX_PARAMETER_NOT_USED(first_unused_memory);
 
-    /* Create a byte memory pool from which to allocate the thread stacks.  */
-    tx_byte_pool_create(&byte_pool_0, "byte pool 0", memory_area, DEMO_BYTE_POOL_SIZE);
+    /* Initialize the NetX system.  */
+    nx_system_initialize();
 
-    /* Put system definition stuff in here, e.g. thread creates and other assorted
-       create information.  */
+    /* Create a packet pool.  */
+    status = nx_packet_pool_create(&pool_0, "NetX Main Packet Pool", SAMPLE_PACKET_SIZE,
+                                   (UCHAR *)sample_pool_stack , sample_pool_stack_size);
 
-    /* Allocate the stack for thread 0.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
+    /* Check for pool creation error.  */
+    if (status)
+    {
+        printf("nx_packet_pool_create fail: %u\r\n", status);
+        return;
+    }
 
-    /* Create the main thread.  */
-    tx_thread_create(&thread_0, "thread 0", thread_0_entry, 0,  
-            pointer, DEMO_STACK_SIZE, 
-            1, 1, TX_NO_TIME_SLICE, TX_AUTO_START);
+    /* Create an IP instance.  */
+    status = nx_ip_create(&ip_0, "NetX IP Instance 0",
+                          SAMPLE_IPV4_ADDRESS, SAMPLE_IPV4_MASK,
+                          &pool_0, SAMPLE_NETWORK_DRIVER,
+                          (UCHAR*)sample_ip_stack, sizeof(sample_ip_stack),
+                          SAMPLE_IP_THREAD_PRIORITY);
 
+    /* Check for IP create errors.  */
+    if (status)
+    {
+        printf("nx_ip_create fail: %u\r\n", status);
+        return;
+    }
 
-    /* Allocate the stack for thread 1.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
+#ifndef SAMPLE_NETWORK_CONFIGURE
+    /* Enable ARP and supply ARP cache memory for IP Instance 0.  */
+    status = nx_arp_enable(&ip_0, (VOID *)sample_arp_cache_area, sizeof(sample_arp_cache_area));
 
-    /* Create threads 1 and 2. These threads pass information through a ThreadX 
-       message queue.  It is also interesting to note that these threads have a time
-       slice.  */
-    tx_thread_create(&thread_1, "thread 1", thread_1_entry, 1,  
-            pointer, DEMO_STACK_SIZE, 
-            16, 16, 4, TX_AUTO_START);
+    /* Check for ARP enable errors.  */
+    if (status)
+    {
+        printf("nx_arp_enable fail: %u\r\n", status);
+        return;
+    }
 
-    /* Allocate the stack for thread 2.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
+    /* Enable ICMP traffic.  */
+    status = nx_icmp_enable(&ip_0);
 
-    tx_thread_create(&thread_2, "thread 2", thread_2_entry, 2,  
-            pointer, DEMO_STACK_SIZE, 
-            16, 16, 4, TX_AUTO_START);
+    /* Check for ICMP enable errors.  */
+    if (status)
+    {
+        printf("nx_icmp_enable fail: %u\r\n", status);
+        return;
+    }
+#endif
 
-    /* Allocate the stack for thread 3.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
+    /* Enable TCP traffic.  */
+    status = nx_tcp_enable(&ip_0);
 
-    /* Create threads 3 and 4.  These threads compete for a ThreadX counting semaphore.  
-       An interesting thing here is that both threads share the same instruction area.  */
-    tx_thread_create(&thread_3, "thread 3", thread_3_and_4_entry, 3,  
-            pointer, DEMO_STACK_SIZE, 
-            8, 8, TX_NO_TIME_SLICE, TX_AUTO_START);
+    /* Check for TCP enable errors.  */
+    if (status)
+    {
+        printf("nx_tcp_enable fail: %u\r\n", status);
+        return;
+    }
 
-    /* Allocate the stack for thread 4.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
+    /* Enable UDP traffic.  */
+    status = nx_udp_enable(&ip_0);
 
-    tx_thread_create(&thread_4, "thread 4", thread_3_and_4_entry, 4,  
-            pointer, DEMO_STACK_SIZE, 
-            8, 8, TX_NO_TIME_SLICE, TX_AUTO_START);
+    /* Check for UDP enable errors.  */
+    if (status)
+    {
+        printf("nx_udp_enable fail: %u\r\n", status);
+        return;
+    }
 
-    /* Allocate the stack for thread 5.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
+    /* Initialize TLS.  */
+    nx_secure_tls_initialize();
 
-    /* Create thread 5.  This thread simply pends on an event flag which will be set
-       by thread_0.  */
-    tx_thread_create(&thread_5, "thread 5", thread_5_entry, 5,  
-            pointer, DEMO_STACK_SIZE, 
-            4, 4, TX_NO_TIME_SLICE, TX_AUTO_START);
+    /* Create sample helper thread.  */
+    status = tx_thread_create(&sample_helper_thread, "Demo Thread",
+                              sample_helper_thread_entry, 0,
+                              sample_helper_thread_stack, SAMPLE_HELPER_STACK_SIZE,
+                              SAMPLE_HELPER_THREAD_PRIORITY, SAMPLE_HELPER_THREAD_PRIORITY,
+                              TX_NO_TIME_SLICE, TX_AUTO_START);
 
-    /* Allocate the stack for thread 6.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
-
-    /* Create threads 6 and 7.  These threads compete for a ThreadX mutex.  */
-    tx_thread_create(&thread_6, "thread 6", thread_6_and_7_entry, 6,  
-            pointer, DEMO_STACK_SIZE, 
-            8, 8, TX_NO_TIME_SLICE, TX_AUTO_START);
-
-    /* Allocate the stack for thread 7.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
-
-    tx_thread_create(&thread_7, "thread 7", thread_6_and_7_entry, 7,  
-            pointer, DEMO_STACK_SIZE, 
-            8, 8, TX_NO_TIME_SLICE, TX_AUTO_START);
-
-    /* Allocate the message queue.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_QUEUE_SIZE*sizeof(ULONG), TX_NO_WAIT);
-
-    /* Create the message queue shared by threads 1 and 2.  */
-    tx_queue_create(&queue_0, "queue 0", TX_1_ULONG, pointer, DEMO_QUEUE_SIZE*sizeof(ULONG));
-
-    /* Create the semaphore used by threads 3 and 4.  */
-    tx_semaphore_create(&semaphore_0, "semaphore 0", 1);
-
-    /* Create the event flags group used by threads 1 and 5.  */
-    tx_event_flags_create(&event_flags_0, "event flags 0");
-
-    /* Create the mutex used by thread 6 and 7 without priority inheritance.  */
-    tx_mutex_create(&mutex_0, "mutex 0", TX_NO_INHERIT);
-
-    /* Allocate the memory for a small block pool.  */
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_BLOCK_POOL_SIZE, TX_NO_WAIT);
-
-    /* Create a block memory pool to allocate a message buffer from.  */
-    tx_block_pool_create(&block_pool_0, "block pool 0", sizeof(ULONG), pointer, DEMO_BLOCK_POOL_SIZE);
-
-    /* Allocate a block and release the block memory.  */
-    tx_block_allocate(&block_pool_0, (VOID **) &pointer, TX_NO_WAIT);
-
-    /* Release the block back to the pool.  */
-    tx_block_release(pointer);
+    /* Check status.  */
+    if (status)
+    {
+        printf("Demo helper thread creation fail: %u\r\n", status);
+        return;
+    }
 }
 
-
-
-/* Define the test threads.  */
-
-void    thread_0_entry(ULONG thread_input)
+/* Define sample helper thread entry.  */
+void sample_helper_thread_entry(ULONG parameter)
 {
 
 UINT    status;
+ULONG   ip_address = 0;
+ULONG   network_mask = 0;
+ULONG   gateway_address = 0;
+UINT    unix_time;
+ULONG   dns_server_address[3];
+#ifndef SAMPLE_DHCP_DISABLE
+UINT    dns_server_address_size = sizeof(dns_server_address);
+#endif
 
-    // LED OFF
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    gpio_put(PICO_DEFAULT_LED_PIN, 0);
+    NX_PARAMETER_NOT_USED(parameter);
 
-    /* This thread simply sits in while-forever-sleep loop.  */
-    while(1)
+#ifndef SAMPLE_DHCP_DISABLE
+    dhcp_wait();
+#elif defined(SAMPLE_NETWORK_CONFIGURE)
+    while (SAMPLE_NETWORK_CONFIGURE(WIFI_SSID, WIFI_PASSWORD, &ip_0, &dns_server_address[0]) < 0) {
+        tx_thread_sleep(TX_TIMER_TICKS_PER_SECOND);
+    }
+#else
+    nx_ip_gateway_address_set(&ip_0, SAMPLE_GATEWAY_ADDRESS);
+#endif /* SAMPLE_DHCP_DISABLE  */
+
+    /* Get IP address and gateway address.  */
+    nx_ip_address_get(&ip_0, &ip_address, &network_mask);
+    nx_ip_gateway_address_get(&ip_0, &gateway_address);
+
+    /* Output IP address and gateway address.  */
+    printf("IP address: %lu.%lu.%lu.%lu\r\n",
+           (ip_address >> 24),
+           (ip_address >> 16 & 0xFF),
+           (ip_address >> 8 & 0xFF),
+           (ip_address & 0xFF));
+    printf("Mask: %lu.%lu.%lu.%lu\r\n",
+           (network_mask >> 24),
+           (network_mask >> 16 & 0xFF),
+           (network_mask >> 8 & 0xFF),
+           (network_mask & 0xFF));
+    printf("Gateway: %lu.%lu.%lu.%lu\r\n",
+           (gateway_address >> 24),
+           (gateway_address >> 16 & 0xFF),
+           (gateway_address >> 8 & 0xFF),
+           (gateway_address & 0xFF));
+
+#ifndef SAMPLE_DHCP_DISABLE
+    /* Retrieve DNS server address.  */
+    nx_dhcp_interface_user_option_retrieve(&dhcp_0, 0, NX_DHCP_OPTION_DNS_SVR, (UCHAR *)(dns_server_address),
+                                           &dns_server_address_size);
+#elif !defined(SAMPLE_NETWORK_CONFIGURE)
+    dns_server_address[0] = SAMPLE_DNS_SERVER_ADDRESS;
+#endif /* SAMPLE_DHCP_DISABLE */
+
+    /* Create DNS.  */
+    status = dns_create(dns_server_address[0]);
+
+    /* Check for DNS create errors.  */
+    if (status)
+    {
+        printf("dns_create fail: %u\r\n", status);
+        return;
+    }
+
+    /* Sync up time by SNTP at start up.  */
+    status = sntp_time_sync();
+
+    /* Check status.  */
+    if (status)
+    {
+        printf("SNTP Time Sync failed.\r\n");
+        printf("Set Time to default value: SAMPLE_SYSTEM_TIME.");
+        unix_time_base = SAMPLE_SYSTEM_TIME;
+    }
+    else
+    {
+        printf("SNTP Time Sync successfully.\r\n");
+    }
+
+    unix_time_get((ULONG *)&unix_time);
+    srand(unix_time);
+
+    /* Start sample.  */
+    sample_entry(&ip_0, &pool_0, &dns_0, unix_time_get);
+}
+
+#ifndef SAMPLE_DHCP_DISABLE
+static void dhcp_wait()
+{
+ULONG   actual_status;
+
+    printf("DHCP In Progress...\r\n");
+
+    /* Create the DHCP instance.  */
+    nx_dhcp_create(&dhcp_0, &ip_0, "DHCP Client");
+
+    /* Request NTP server.  */
+    nx_dhcp_user_option_request(&dhcp_0, NX_DHCP_OPTION_NTP_SVR);
+
+    /* Start the DHCP Client.  */
+    nx_dhcp_start(&dhcp_0);
+
+    /* Wait util address is solved.  */
+    nx_ip_status_check(&ip_0, NX_IP_ADDRESS_RESOLVED, &actual_status, NX_WAIT_FOREVER);
+}
+#endif /* SAMPLE_DHCP_DISABLE  */
+
+static UINT dns_create(ULONG dns_server_address)
+{
+UINT    status;
+
+    /* Create a DNS instance for the Client.  Note this function will create
+       the DNS Client packet pool for creating DNS message packets intended
+       for querying its DNS server.  */
+    status = nx_dns_create(&dns_0, &ip_0, (UCHAR *)"DNS Client");
+    if (status)
+    {
+        return(status);
+    }
+
+    /* Is the DNS client configured for the host application to create the packet pool?  */
+#ifdef NX_DNS_CLIENT_USER_CREATE_PACKET_POOL
+
+    /* Yes, use the packet pool created above which has appropriate payload size
+       for DNS messages.  */
+    status = nx_dns_packet_pool_set(&dns_0, ip_0.nx_ip_default_packet_pool);
+    if (status)
+    {
+        nx_dns_delete(&dns_0);
+        return(status);
+    }
+#endif /* NX_DNS_CLIENT_USER_CREATE_PACKET_POOL */
+
+    /* Add an IPv4 server address to the Client list.  */
+    status = nx_dns_server_add(&dns_0, dns_server_address);
+    if (status)
+    {
+        nx_dns_delete(&dns_0);
+        return(status);
+    }
+
+    /* Output DNS Server address.  */
+    printf("DNS Server address: %lu.%lu.%lu.%lu\r\n",
+           (dns_server_address >> 24),
+           (dns_server_address >> 16 & 0xFF),
+           (dns_server_address >> 8 & 0xFF),
+           (dns_server_address & 0xFF));
+
+    return(NX_SUCCESS);
+}
+
+/* Sync up the local time.  */
+static UINT sntp_time_sync_internal(ULONG sntp_server_address)
+{
+UINT    status;
+UINT    server_status;
+UINT    i;
+
+    /* Create the SNTP Client to run in broadcast mode.. */
+    status =  nx_sntp_client_create(&sntp_client, &ip_0, 0, &pool_0,  
+                                    NX_NULL,
+                                    NX_NULL,
+                                    NX_NULL /* no random_number_generator callback */);
+
+    /* Check status.  */
+    if (status)
+    {
+        return(status);
+    }
+
+    /* Use the IPv4 service to initialize the Client and set the IPv4 SNTP server. */
+    status = nx_sntp_client_initialize_unicast(&sntp_client, sntp_server_address);
+
+    /* Check status.  */
+    if (status)
+    {
+        nx_sntp_client_delete(&sntp_client);
+        return(status);
+    }
+
+    /* Set local time to 0 */
+    status = nx_sntp_client_set_local_time(&sntp_client, 0, 0);
+
+    /* Check status.  */
+    if (status)
+    {
+        nx_sntp_client_delete(&sntp_client);
+        return(status);
+    }
+
+    /* Run Unicast client */
+    status = nx_sntp_client_run_unicast(&sntp_client);
+
+    /* Check status.  */
+    if (status)
+    {
+        nx_sntp_client_stop(&sntp_client);
+        nx_sntp_client_delete(&sntp_client);
+        return(status);
+    }
+
+    /* Wait till updates are received */
+    for (i = 0; i < SAMPLE_SNTP_UPDATE_MAX; i++)
     {
 
-        /* Increment the thread counter.  */
-        thread_0_counter++;
+        /* First verify we have a valid SNTP service running. */
+        status = nx_sntp_client_receiving_updates(&sntp_client, &server_status);
 
-        if (thread_0_counter % 2 == 0) {
-            gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        } else {
-            gpio_put(PICO_DEFAULT_LED_PIN, 0);
+        /* Check status.  */
+        if ((status == NX_SUCCESS) && (server_status == NX_TRUE))
+        {
+
+            /* Server status is good. Now get the Client local time. */
+            ULONG sntp_seconds, sntp_fraction;
+            ULONG system_time_in_second;
+
+            /* Get the local time.  */
+            status = nx_sntp_client_get_local_time(&sntp_client, &sntp_seconds, &sntp_fraction, NX_NULL);
+
+            /* Check status.  */
+            if (status != NX_SUCCESS)
+            {
+                continue;
+            }
+
+            /* Get the system time in second.  */
+            system_time_in_second = tx_time_get() / TX_TIMER_TICKS_PER_SECOND;
+
+            /* Convert to Unix epoch and minus the current system time.  */
+            unix_time_base = (sntp_seconds - (system_time_in_second + SAMPLE_UNIX_TO_NTP_EPOCH_SECOND));
+
+            /* Time sync successfully.  */
+
+            /* Stop and delete SNTP.  */
+            nx_sntp_client_stop(&sntp_client);
+            nx_sntp_client_delete(&sntp_client);
+
+            return(NX_SUCCESS);
         }
 
-        /* Print results.  */
-        printf("**** ThreadX Demonstration on Raspberry Pi Pico **** \n\n");
-        printf("           thread 0 events sent:          %lu\n", thread_0_counter);
-        printf("           thread 1 messages sent:        %lu\n", thread_1_counter);
-        printf("           thread 2 messages received:    %lu\n", thread_2_counter);
-        printf("           thread 3 obtained semaphore:   %lu\n", thread_3_counter);
-        printf("           thread 4 obtained semaphore:   %lu\n", thread_4_counter);
-        printf("           thread 5 events received:      %lu\n", thread_5_counter);
-        printf("           thread 6 mutex obtained:       %lu\n", thread_6_counter);
-        printf("           thread 7 mutex obtained:       %lu\n\n", thread_7_counter);
-
-        /* Sleep for 50 ticks.  */
-        tx_thread_sleep(100);
-
-        /* Set event flag 0 to wakeup thread 5.  */
-        status =  tx_event_flags_set(&event_flags_0, 0x1, TX_OR);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
+        /* Sleep.  */
+        tx_thread_sleep(SAMPLE_SNTP_UPDATE_INTERVAL);
     }
+
+    /* Time sync failed.  */
+
+    /* Stop and delete SNTP.  */
+    nx_sntp_client_stop(&sntp_client);
+    nx_sntp_client_delete(&sntp_client);
+
+    /* Return success.  */
+    return(NX_NOT_SUCCESSFUL);
 }
 
+static UINT sntp_time_sync()
+{
+UINT status;
+ULONG sntp_server_address[3];
+#ifndef SAMPLE_DHCP_DISABLE
+UINT  sntp_server_address_size = sizeof(sntp_server_address);
+#endif
 
-void    thread_1_entry(ULONG thread_input)
+#ifndef SAMPLE_DHCP_DISABLE
+    /* Retrieve NTP server address.  */
+    status = nx_dhcp_interface_user_option_retrieve(&dhcp_0, 0, NX_DHCP_OPTION_NTP_SVR, (UCHAR *)(sntp_server_address),
+                                                    &sntp_server_address_size);
+
+    /* Check status.  */
+    if (status == NX_SUCCESS)
+    {
+        for (UINT i = 0; (i * 4) < sntp_server_address_size; i++)
+        {
+            printf("SNTP Time Sync...%lu.%lu.%lu.%lu (DHCP)\r\n", 
+                   (sntp_server_address[i] >> 24),
+                   (sntp_server_address[i] >> 16 & 0xFF),
+                   (sntp_server_address[i] >> 8 & 0xFF),
+                   (sntp_server_address[i] & 0xFF));
+
+            /* Start SNTP to sync the local time.  */
+            status = sntp_time_sync_internal(sntp_server_address[i]);
+
+            /* Check status.  */
+            if(status == NX_SUCCESS)
+            {
+                return(NX_SUCCESS);
+            }
+        }
+    }
+#endif /* SAMPLE_DHCP_DISABLE */
+
+    /* Sync time by NTP server array.  */
+    for (UINT i = 0; i < SAMPLE_SNTP_SYNC_MAX; i++)
+    {
+        printf("SNTP Time Sync...%s\r\n", sntp_servers[sntp_server_index]);
+
+        /* Look up SNTP Server address. */
+        status = nx_dns_host_by_name_get(&dns_0, (UCHAR *)sntp_servers[sntp_server_index], &sntp_server_address[0], 5 * NX_IP_PERIODIC_RATE);
+
+        /* Check status.  */
+        if (status == NX_SUCCESS)
+        {
+
+            /* Start SNTP to sync the local time.  */
+            status = sntp_time_sync_internal(sntp_server_address[0]);
+
+            /* Check status.  */
+            if(status == NX_SUCCESS)
+            {
+                return(NX_SUCCESS);
+            }
+        }
+
+        /* Switch SNTP server every time.  */
+        sntp_server_index = (sntp_server_index + 1) % (sizeof(sntp_servers) / sizeof(sntp_servers[0]));
+    }
+
+    return(NX_NOT_SUCCESSFUL);
+}
+
+static UINT unix_time_get(ULONG *unix_time)
 {
 
-UINT    status;
+    /* Return number of seconds since Unix Epoch (1/1/1970 00:00:00).  */
+    *unix_time =  unix_time_base + (tx_time_get() / TX_TIMER_TICKS_PER_SECOND);
 
-
-    /* This thread simply sends messages to a queue shared by thread 2.  */
-    while(1)
-    {
-
-        /* Increment the thread counter.  */
-        thread_1_counter++;
-
-        /* Send message to queue 0.  */
-        status =  tx_queue_send(&queue_0, &thread_1_messages_sent, TX_WAIT_FOREVER);
-
-        /* Check completion status.  */
-        if (status != TX_SUCCESS)
-            break;
-
-        /* Increment the message sent.  */
-        thread_1_messages_sent++;
-    }
-}
-
-
-void    thread_2_entry(ULONG thread_input)
-{
-
-ULONG   received_message;
-UINT    status;
-
-    /* This thread retrieves messages placed on the queue by thread 1.  */
-    while(1)
-    {
-
-        /* Increment the thread counter.  */
-        thread_2_counter++;
-
-        /* Retrieve a message from the queue.  */
-        status = tx_queue_receive(&queue_0, &received_message, TX_WAIT_FOREVER);
-
-        /* Check completion status and make sure the message is what we 
-           expected.  */
-        if ((status != TX_SUCCESS) || (received_message != thread_2_messages_received))
-            break;
-        
-        /* Otherwise, all is okay.  Increment the received message count.  */
-        thread_2_messages_received++;
-    }
-}
-
-
-void    thread_3_and_4_entry(ULONG thread_input)
-{
-
-UINT    status;
-
-
-    /* This function is executed from thread 3 and thread 4.  As the loop
-       below shows, these function compete for ownership of semaphore_0.  */
-    while(1)
-    {
-
-        /* Increment the thread counter.  */
-        if (thread_input == 3)
-            thread_3_counter++;
-        else
-            thread_4_counter++;
-
-        /* Get the semaphore with suspension.  */
-        status =  tx_semaphore_get(&semaphore_0, TX_WAIT_FOREVER);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
-
-        /* Sleep for 2 ticks to hold the semaphore.  */
-        tx_thread_sleep(2);
-
-        /* Release the semaphore.  */
-        status =  tx_semaphore_put(&semaphore_0);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
-    }
-}
-
-
-void    thread_5_entry(ULONG thread_input)
-{
-
-UINT    status;
-ULONG   actual_flags;
-
-
-    /* This thread simply waits for an event in a forever loop.  */
-    while(1)
-    {
-
-        /* Increment the thread counter.  */
-        thread_5_counter++;
-
-        /* Wait for event flag 0.  */
-        status =  tx_event_flags_get(&event_flags_0, 0x1, TX_OR_CLEAR, 
-                                                &actual_flags, TX_WAIT_FOREVER);
-
-        /* Check status.  */
-        if ((status != TX_SUCCESS) || (actual_flags != 0x1))
-            break;
-    }
-}
-
-
-void    thread_6_and_7_entry(ULONG thread_input)
-{
-
-UINT    status;
-
-
-    /* This function is executed from thread 6 and thread 7.  As the loop
-       below shows, these function compete for ownership of mutex_0.  */
-    while(1)
-    {
-
-        /* Increment the thread counter.  */
-        if (thread_input == 6)
-            thread_6_counter++;
-        else
-            thread_7_counter++;
-
-        /* Get the mutex with suspension.  */
-        status =  tx_mutex_get(&mutex_0, TX_WAIT_FOREVER);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
-
-        /* Get the mutex again with suspension.  This shows
-           that an owning thread may retrieve the mutex it
-           owns multiple times.  */
-        status =  tx_mutex_get(&mutex_0, TX_WAIT_FOREVER);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
-
-        /* Sleep for 2 ticks to hold the mutex.  */
-        tx_thread_sleep(2);
-
-        /* Release the mutex.  */
-        status =  tx_mutex_put(&mutex_0);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
-
-        /* Release the mutex again.  This will actually 
-           release ownership since it was obtained twice.  */
-        status =  tx_mutex_put(&mutex_0);
-
-        /* Check status.  */
-        if (status != TX_SUCCESS)
-            break;
-    }
-}
-
-int main() {
-
-    stdio_init_all();
-    printf("Hello Neo\n");
-
-    demo_threadx();
-
-    return 0;
+    return(NX_SUCCESS);
 }

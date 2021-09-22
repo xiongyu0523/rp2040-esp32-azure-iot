@@ -1,10 +1,10 @@
-# Azure IoT middleware for Azure RTOS runs on Raspberry Pi RP2040 MCU and Espressif ESP32-C3 SoC
+# Azure IoT Example runs on Raspberry Pi RP2040
 
 ## Introduction
 
 This project is to connect 1$ [Raspberry Pi RP2040](https://www.raspberrypi.org/documentation/microcontrollers/rp2040.html) MCU to Azure IoT by using a [ESP32-C3](https://www.espressif.com/en/products/socs/esp32-c3) SoC as network processor. 
 
-The Application is a standard Azure IoT example built on [Azure IoT middleware for Azure RTOS](https://github.com/azure-rtos/netxduo/blob/master/addons/azure_iot/docs/README.md) and it leverages [LwESP](https://github.com/MaJerle/lwesp) project to get WiFi connectivity support, integrated with NetX Duo 6.1.8 [offload driver](https://docs.microsoft.com/en-us/azure/rtos/netx-duo/chapter5#tcpip-offload-driver-guidance). 
+The Application is a standard Azure IoT example built on [Azure IoT middleware for Azure RTOS](https://github.com/azure-rtos/netxduo/blob/master/addons/azure_iot/docs/README.md) and it leverages [LwESP](https://github.com/MaJerle/lwesp) project to get WiFi connectivity supported. A custom offload network driver is provided to integrat with NetX Duo 6.1.8 [offload driver](https://docs.microsoft.com/en-us/azure/rtos/netx-duo/chapter5#tcpip-offload-driver-guidance). 
 
 ## Hardware
 
@@ -12,11 +12,11 @@ The demo is verified on [Raspberry Pi Pico](https://www.st.com/en/evaluation-too
 
 | Signal name | Raspberry Pi Pico | ESP32-C3-DevKitM-1 |
 | ---- |  ----  | ---- |
-| 3V3  |  | J1-21  |
-| GND |    | J1-1   | 
-| TX  |  | J3-9 (UART1-RX) | 
-| RX  |  | J3-8 (URAT1-TX) | 
-| RESET |  | CN1-7 (EN) |
+| 3V3  | J0-36 | J1-2  |
+| GND | J0-38  | J1-1   | 
+| TX  | J0-6 (UART1-TX) | J3-9 (UART1-RX) | 
+| RX  | J0-7 (UART1-RX) | J3-8 (URAT1-TX) | 
+| RESET | J0-4 (GP2) | J1-7 (EN) |
 
 ## Prequisite 
 
@@ -24,11 +24,12 @@ ESP32-C3 must be programmed with ESP-AT firmware. Refer to this [link](https://d
 
 ## License
 
+> Please be aware that this project is ONLY for demo and study purpose. Azure RTOS does not include a commerical license for Raspberry Pi RP2040 MCU. See below license details. 
+
 | Components | License
 | ---- |  ----  | 
 | app  | Refer to [LICENSE](./LICENSE)  |
 | lwesp | Refer to [LICENSE](./lwesp/LICENSE)  |
 | threadx / netxduo | Refer to [LICENSE.txt](./threadx/LICENSE.txt) and [LICENSED-HARDWARE.txt](./threadx/LICENSED-HARDWARE.txt) | 
 
-> Please be aware that this project is ONLY for demo and study purpose. Azure RTOS does not include a commerical license for Raspberry Pi RP2040 MCU. 
 

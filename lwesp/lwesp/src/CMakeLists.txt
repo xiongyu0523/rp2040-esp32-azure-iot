@@ -1,5 +1,5 @@
+# Pick up all required sources
 set(SOURCES
-    # {{BEGIN_TARGET_SOURCES}}
 	${CMAKE_CURRENT_LIST_DIR}/lwesp/lwesp_ap.c
 	${CMAKE_CURRENT_LIST_DIR}/lwesp/lwesp_buff.c
 	${CMAKE_CURRENT_LIST_DIR}/lwesp/lwesp_cli.c
@@ -27,19 +27,10 @@ set(SOURCES
 	${CMAKE_CURRENT_LIST_DIR}/lwesp/lwesp_wps.c
 	${CMAKE_CURRENT_LIST_DIR}/lwesp/lwesp.c
 	${CMAKE_CURRENT_LIST_DIR}/api/lwesp_netconn.c
-    # {{END_TARGET_SOURCES}}
 )
 
-list(APPEND SOURCES ${CMAKE_CURRENT_LIST_DIR}/system/lwesp_sys_${LWESP_OS}.c ${LWESP_PLATFORM_FILE})
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include/system/port/${LWESP_OS})
-
-# Append customized heap implemenation file if user wants it
-if(DEFINED LWESP_MEMHEAP_FILE)
-    list(APPEND SOURCES ${LWESP_MEMHEAP_FILE})
-endif()
-
-# Append MQTT files if the user wants it
-if(LWESP_ENABLE_MQTT)
+# Append MQTT files if user need it
+if(LWESP_OPTION_MQTTC)
     list(APPEND SOURCES
          ${CMAKE_CURRENT_LIST_DIR}/apps/mqtt/lwesp_mqtt_client_api.c
          ${CMAKE_CURRENT_LIST_DIR}/apps/mqtt/lwesp_mqtt_client_evt.c
@@ -49,10 +40,15 @@ endif()
 
 # TODO: Append HTTP server files if the user wants it
 # TODO: Append cayenne files if the user wants it
-# TODO: Append cli files if the user wants it
+
+# Append CLI files if user need it
+if(LWESP_OPTION_CLI)
+    list(APPEND SOURCES
+         ${CMAKE_CURRENT_LIST_DIR}/cli/cli_input.c
+         ${CMAKE_CURRENT_LIST_DIR}/cli/cli.c
+    )
+endif()
 
 target_sources(${PROJECT_NAME} PRIVATE ${SOURCES})
 
-target_include_directories(${PROJECT_NAME} PUBLIC
-    ${CMAKE_CURRENT_LIST_DIR}/include
-)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)

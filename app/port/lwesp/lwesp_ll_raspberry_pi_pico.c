@@ -1,6 +1,6 @@
 /**
- * \file            lwesp_ll_raspberry_pi_pico_threadx.c
- * \brief           low level driver for raspberry pi pico with threadx
+ * \file            lwesp_ll_stm32_threadx.c
+ * \brief           Generic STM32 driver for ThreadX, included in various STM32 driver variants
  */
 
 /*
@@ -33,68 +33,70 @@
  * Version:         v1.1.0-dev
  */
 
-/*
- * How it works
- *
- * On first call to \ref lwesp_ll_init, new thread is created and processed in usart_ll_thread function.
- * USART is configured in RX DMA mode and any incoming bytes are processed inside thread function.
- * DMA and USART implement interrupt handlers to notify main thread about new data ready to send to upper layer.
- *
- * More about UART + RX DMA: https://github.com/MaJerle/stm32-usart-dma-rx-tx
- *
- * \ref LWESP_CFG_INPUT_USE_PROCESS must be enabled in `lwesp_config.h` to use this driver.
- */
-#include <stdint.h>
 #include "lwesp/lwesp.h"
 #include "lwesp/lwesp_mem.h"
 #include "lwesp/lwesp_input.h"
 #include "system/lwesp_ll.h"
-#include "tx_api.h"
+
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+#include "hardware/uart.h"
+#include "hardware/irq.h"
 
 #if !__DOXYGEN__
 
-#if !LWESP_CFG_INPUT_USE_PROCESS
-#error "LWESP_CFG_INPUT_USE_PROCESS must be enabled in `lwesp_config.h` to use this driver."
+#if LWESP_CFG_INPUT_USE_PROCESS
+#error "LWESP_CFG_INPUT_USE_PROCESS must be disabled in `lwesp_opts.h` to use this driver."
 #endif /* LWESP_CFG_INPUT_USE_PROCESS */
 
-#if !defined(LWESP_USART_DMA_RX_BUFF_SIZE)
-#define LWESP_USART_DMA_RX_BUFF_SIZE      0x1000
-#endif /* !defined(LWESP_USART_DMA_RX_BUFF_SIZE) */
+#define LWESP_RESET_PIN         2
+#define LWESP_UART              uart1
+#define LWESP_UART_IRQn         UART1_IRQ
+#define LWESP_UART_TX_PIN       4
+#define LWESP_UART_RX_PIN       5
 
-#if !defined(LWESP_USART_RDR_NAME)
-#define LWESP_USART_RDR_NAME              RDR
-#endif /* !defined(LWESP_USART_RDR_NAME) */
+static uint8_t  initialized;
 
-#define LL_QUEUE_NUM_OF_ENTRY             10
-static UCHAR        ll_queue[LL_QUEUE_NUM_OF_ENTRY * sizeof(void *)];
-
-/* USART memory */
-static uint8_t      usart_mem[LWESP_USART_DMA_RX_BUFF_SIZE];
-static uint8_t      is_running, initialized;
-static size_t       old_pos;
-
-/* USART thread */
-static void usart_ll_thread_entry(ULONG arg);
-static TX_THREAD usart_ll_thread;
-static UCHAR usart_ll_thread_stack[LWESP_SYS_THREAD_SS];
-
-/* Message queue */
-static TX_QUEUE usart_ll_mbox;
+static void     configure_uart(uint32_t baudrate);
+static uint8_t  reset_device(uint8_t state);
+static size_t   send_data(const void* data, size_t len);
+static void     uart_isr(void);
 
 /**
- * \brief           USART data processing
- */
-static void
-usart_ll_thread_entry(ULONG arg) {
-
-}
-
-/**
- * \brief           Configure UART using DMA for receive in double buffer mode and IDLE line detection
+ * \brief           Configure UART
  */
 static void
 configure_uart(uint32_t baudrate) {
 
+    if (!initialized) {
+
+#if defined(LWESP_RESET_PIN)
+        /* Configure RESET pin */
+        gpio_init(LWESP_RESET_PIN);
+        gpio_disable_pulls(LWESP_RESET_PIN);
+        gpio_set_dir(LWESP_RESET_PIN, GPIO_OUT);
+        gpio_put(LWESP_RESET_PIN, 1);
+#endif /* defined(LWESP_RESET_PIN) */
+
+        /* Configure UART */
+        uart_init(LWESP_UART, baudrate);
+        uart_set_format(LWESP_UART, 8, 1, UART_PARITY_NONE);
+        uart_set_fifo_enabled(LWESP_UART, false);
+        uart_set_hw_flow(LWESP_UART, false, false);
+
+        /* Configure USART pins */
+        gpio_set_function(LWESP_UART_TX_PIN, GPIO_FUNC_UART);
+        gpio_set_function(LWESP_UART_RX_PIN, GPIO_FUNC_UART);
+
+        /* Enable UART interrupts */
+        irq_set_exclusive_handler(LWESP_UART_IRQn, uart_isr);
+        irq_set_enabled(LWESP_UART_IRQn, true);
+
+        /* Now enable the UART interrupts */
+        uart_set_irq_enables(LWESP_UART, true, false);
+    } else {
+        uart_set_baudrate(LWESP_UART, baudrate);
+    }
 }
 
 #if defined(LWESP_RESET_PIN)
@@ -104,6 +106,11 @@ configure_uart(uint32_t baudrate) {
 static uint8_t
 reset_device(uint8_t state) {
 
+    if (state) {                                /* Activate reset line */
+        gpio_put(LWESP_RESET_PIN, 0);
+    } else {
+        gpio_put(LWESP_RESET_PIN, 1);
+    }
     return 1;
 }
 #endif /* defined(LWESP_RESET_PIN) */
@@ -116,8 +123,8 @@ reset_device(uint8_t state) {
  */
 static size_t
 send_data(const void* data, size_t len) {
-
-    return 0;
+    uart_write_blocking(LWESP_UART, data, len);
+    return len;
 }
 
 /**
@@ -144,8 +151,20 @@ lwesp_ll_init(lwesp_ll_t* ll) {
 lwespr_t
 lwesp_ll_deinit(lwesp_ll_t* ll) {
 
-
+    initialized = 0;
+    LWESP_UNUSED(ll);
     return lwespOK;
+}
+
+/**
+ * \brief           UART global interrupt handler
+ */
+void
+uart_isr(void) {
+    while (uart_is_readable(LWESP_UART)) {
+        uint8_t ch = uart_getc(LWESP_UART);
+        lwesp_input(&ch, 1);
+    }
 }
 
 #endif /* !__DOXYGEN__ */

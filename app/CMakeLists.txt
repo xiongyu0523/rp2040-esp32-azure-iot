@@ -1,5 +1,13 @@
 target_sources(${PROJECT_NAME}
     PRIVATE
 	${CMAKE_CURRENT_LIST_DIR}/main.c
-    ${CMAKE_CURRENT_LIST_DIR}/bsp/tx_initialize_low_level.S
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/nx_azure_iot_cert.c
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/nx_azure_iot_ciphersuites.c
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/nx_driver_esp_offload.c
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/sample_azure_iot_embedded_sdk.c
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/sample_device_identity.c
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/sample_network.c
+    ${CMAKE_CURRENT_LIST_DIR}/azure-iot/wifi.c
+    ${CMAKE_CURRENT_LIST_DIR}/port/threadx/tx_initialize_low_level.S
+    ${CMAKE_CURRENT_LIST_DIR}/port/lwesp/lwesp_ll_raspberry_pi_pico.c
 )

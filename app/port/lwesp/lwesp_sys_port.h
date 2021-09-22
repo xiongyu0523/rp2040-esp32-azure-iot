@@ -1,6 +1,6 @@
 /**
- * \file            lwesp_opts.h
- * \brief           user config file
+ * \file            lwesp_sys_port.h
+ * \brief           ThreadX native port
  */
 
 /*
@@ -29,20 +29,37 @@
  * This file is part of LwESP - Lightweight ESP-AT parser library.
  *
  * Author:          Tilen MAJERLE <tilen@majerle.eu>
+ * Author:          Neo Xiong <xiongyu0523@gmail.com>
  * Version:         v1.1.0-dev
  */
-#ifndef LWESP_HDR_OPTS_H
-#define LWESP_HDR_OPTS_H
+#ifndef LWESP_HDR_SYSTEM_PORT_H
+#define LWESP_HDR_SYSTEM_PORT_H
 
-#define LWESP_CFG_ESP32_C3          1
-#define LWESP_CFG_RESTORE_ON_INIT   1
-#define LWESP_CFG_INPUT_USE_PROCESS 0
-#define LWESP_CFG_MEM_CUSTOM        1
-#define LWESP_MEM_SIZE              8192
-#define LWESP_CFG_NETCONN           1
-#define LWESP_CFG_DNS               1
-#define LWESP_CFG_WEBSERVER         0
-#define LWESP_CFG_AT_ECHO           0
-#define LWESP_CFG_SNTP              1
+#include <stdint.h>
+#include <stdlib.h>
+#include "lwesp/lwesp_opt.h"
+#include "tx_api.h"
 
-#endif /* LWESP_HDR_OPTS_H */
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
+#if LWESP_CFG_OS && !__DOXYGEN__
+
+typedef TX_MUTEX                    lwesp_sys_mutex_t;
+typedef TX_SEMAPHORE                lwesp_sys_sem_t;
+typedef TX_QUEUE                    lwesp_sys_mbox_t;
+typedef TX_THREAD                   lwesp_sys_thread_t;
+typedef UINT                        lwesp_sys_thread_prio_t;
+
+#define LWESP_SYS_TIMEOUT           TX_WAIT_FOREVER
+#define LWESP_SYS_THREAD_PRIO       (TX_MAX_PRIORITIES - 1)
+#define LWESP_SYS_THREAD_SS         1024
+
+#endif /* LWESP_CFG_OS && !__DOXYGEN__ */
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif /* LWESP_HDR_SYSTEM_PORT_H */
